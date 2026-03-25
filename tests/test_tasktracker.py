@@ -1,5 +1,5 @@
 """
-Тесты для TaskTracker
+Тесты для TaskTracker (без GUI)
 """
 
 import pytest
@@ -9,175 +9,146 @@ import json
 import tempfile
 import shutil
 
-# Добавляем путь к корневой папке
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-# Импортируем функции из приложения
-from tasktracker import load_data, save_users, save_tasks, add_task, delete_task, mark_done
+from taskmanager import TaskManager
 
 
-class TestTaskTracker:
+class TestTaskManager:
 
     @pytest.fixture
-    def temp_data_dir(self):
-        """Создаёт временную папку для тестовых данных"""
+    def manager(self):
+        """Создаёт менеджер задач с временными файлами"""
+        # Создаём временную папку
         temp_dir = tempfile.mkdtemp()
-        old_data_dir = "data"
+        users_file = os.path.join(temp_dir, "users.json")
+        tasks_file = os.path.join(temp_dir, "tasks.json")
 
-        # Сохраняем оригинальную папку и подменяем на временную
-        original_dir = os.getcwd()
-        os.chdir(temp_dir)
+        manager = TaskManager(users_file, tasks_file)
 
-        # Создаём папку data во временной директории
-        os.makedirs("data", exist_ok=True)
+        yield manager
 
-        yield temp_dir
-
-        # Возвращаемся обратно и удаляем временную папку
-        os.chdir(original_dir)
+        # Удаляем временную папку
         shutil.rmtree(temp_dir)
 
-    def test_register_user(self, temp_data_dir):
-        """TC-01: Регистрация нового пользователя"""
-        import tasktracker
+    def test_register_success(self, manager):
+        """TC-01: Успешная регистрация"""
+        success, message = manager.register("testuser", "password123")
 
-        # Подменяем глобальные переменные
-        tasktracker.users = {}
-        tasktracker.USERS_FILE = "data/users.json"
+        assert success is True
+        assert "зарегистрирован" in message
+        assert "testuser" in manager.users
 
-        # Создаём пользователя
-        tasktracker.users["testuser"] = "password123"
-        tasktracker.save_users()
+    def test_register_short_password(self, manager):
+        """TC-02: Регистрация с коротким паролем"""
+        success, message = manager.register("testuser", "123")
 
-        # Проверяем, что файл создался и содержит данные
-        with open("data/users.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
+        assert success is False
+        assert "4 символов" in message
 
-        assert "testuser" in data
-        assert data["testuser"] == "password123"
+    def test_register_duplicate(self, manager):
+        """TC-03: Регистрация существующего пользователя"""
+        manager.register("testuser", "password123")
+        success, message = manager.register("testuser", "newpass")
 
-    def test_login_success(self, temp_data_dir):
-        """TC-02: Вход с корректными данными"""
-        import tasktracker
+        assert success is False
+        assert "существует" in message
 
-        tasktracker.users = {"testuser": "password123"}
-        tasktracker.current_user = None
+    def test_login_success(self, manager):
+        """TC-04: Успешный вход"""
+        manager.register("testuser", "password123")
+        success, message = manager.login("testuser", "password123")
 
-        # Эмулируем успешный вход
-        if "testuser" in tasktracker.users and tasktracker.users["testuser"] == "password123":
-            tasktracker.current_user = "testuser"
+        assert success is True
+        assert manager.current_user == "testuser"
 
-        assert tasktracker.current_user == "testuser"
+    def test_login_wrong_password(self, manager):
+        """TC-05: Вход с неверным паролем"""
+        manager.register("testuser", "password123")
+        success, message = manager.login("testuser", "wrongpass")
 
-    def test_login_fail_wrong_password(self, temp_data_dir):
-        """TC-03: Вход с неверным паролем"""
-        import tasktracker
+        assert success is False
+        assert manager.current_user is None
 
-        tasktracker.users = {"testuser": "password123"}
-        tasktracker.current_user = None
+    def test_login_nonexistent_user(self, manager):
+        """TC-06: Вход несуществующего пользователя"""
+        success, message = manager.login("unknown", "pass")
 
-        # Эмулируем попытку входа с неверным паролем
-        if "testuser" in tasktracker.users and tasktracker.users["testuser"] == "wrongpass":
-            tasktracker.current_user = "testuser"
+        assert success is False
+        assert manager.current_user is None
 
-        assert tasktracker.current_user is None
+    def test_add_task_success(self, manager):
+        """TC-07: Успешное создание задачи"""
+        manager.register("testuser", "pass")
+        manager.login("testuser", "pass")
 
-    def test_create_task(self, temp_data_dir):
-        """TC-04: Создание задачи"""
-        import tasktracker
+        success, message = manager.add_task("Купить хлеб")
 
-        tasktracker.tasks = []
-        tasktracker.current_user = "testuser"
+        assert success is True
+        assert len(manager.tasks) == 1
+        assert manager.tasks[0]["title"] == "Купить хлеб"
 
-        # Эмулируем создание задачи
-        new_task = {"user": "testuser", "title": "Тестовая задача", "done": False}
-        tasktracker.tasks.append(new_task)
+    def test_add_task_empty_title(self, manager):
+        """TC-08: Создание задачи с пустым названием"""
+        manager.register("testuser", "pass")
+        manager.login("testuser", "pass")
 
-        assert len(tasktracker.tasks) == 1
-        assert tasktracker.tasks[0]["title"] == "Тестовая задача"
-        assert tasktracker.tasks[0]["done"] is False
+        success, message = manager.add_task("")
 
-    def test_create_task_empty_title(self, temp_data_dir):
-        """TC-05: Создание задачи с пустым названием"""
-        import tasktracker
+        assert success is False
+        assert "пустым" in message
 
-        # В текущей версии приложения нет валидации пустого названия
-        # Это ожидаемый дефект (Major)
-        tasktracker.tasks = []
-        tasktracker.current_user = "testuser"
+    def test_add_task_without_login(self, manager):
+        """TC-09: Создание задачи без входа"""
+        success, message = manager.add_task("Задача")
 
-        # Эмулируем создание задачи с пустым названием
-        new_task = {"user": "testuser", "title": "", "done": False}
-        tasktracker.tasks.append(new_task)
+        assert success is False
+        assert "войдите" in message
 
-        # Дефект: задача с пустым названием создаётся
-        assert len(tasktracker.tasks) == 1
-        assert tasktracker.tasks[0]["title"] == ""  # Это баг!
+    def test_delete_task_success(self, manager):
+        """TC-10: Успешное удаление задачи"""
+        manager.register("testuser", "pass")
+        manager.login("testuser", "pass")
+        manager.add_task("Задача 1")
 
-    def test_delete_task(self, temp_data_dir):
-        """TC-06: Удаление задачи"""
-        import tasktracker
+        success, message = manager.delete_task(0)
 
-        tasktracker.tasks = [
-            {"user": "testuser", "title": "Задача 1", "done": False},
-            {"user": "testuser", "title": "Задача 2", "done": False}
-        ]
+        assert success is True
+        assert len(manager.tasks) == 0
 
-        # Удаляем первую задачу
-        index = 0
-        del tasktracker.tasks[index]
+    def test_delete_nonexistent_task(self, manager):
+        """TC-11: Удаление несуществующей задачи"""
+        manager.register("testuser", "pass")
+        manager.login("testuser", "pass")
 
-        assert len(tasktracker.tasks) == 1
-        assert tasktracker.tasks[0]["title"] == "Задача 2"
+        success, message = manager.delete_task(999)
 
-    def test_delete_nonexistent_task(self, temp_data_dir):
-        """TC-07: Удаление несуществующей задачи (ожидаемый дефект)"""
-        import tasktracker
+        assert success is False
+        assert "не найдена" in message
 
-        tasktracker.tasks = []
+    def test_mark_done_success(self, manager):
+        """TC-12: Отметка задачи как выполненной"""
+        manager.register("testuser", "pass")
+        manager.login("testuser", "pass")
+        manager.add_task("Задача 1")
 
-        # В текущей версии приложения нет проверки на пустой список
-        # Это ожидаемый дефект (Major)
+        success, message = manager.mark_done(0)
 
-        # Эмулируем попытку удаления из пустого списка
-        # Приложение должно показывать ошибку, но сейчас падает
-        try:
-            index = 0  # несуществующий индекс
-            del tasktracker.tasks[index]
-            assert False, "Должна быть ошибка, но задача была 'удалена'"
-        except IndexError:
-            # Ожидаемое поведение — ошибка, но приложение должно ловить её
-            assert True
+        assert success is True
+        assert manager.tasks[0]["done"] is True
 
-    def test_mark_task_done(self, temp_data_dir):
-        """TC-08: Отметка задачи как выполненной"""
-        import tasktracker
+    def test_get_tasks_for_current_user(self, manager):
+        """TC-13: Получение задач текущего пользователя"""
+        manager.register("user1", "pass")
+        manager.login("user1", "pass")
+        manager.add_task("Задача user1")
 
-        tasktracker.tasks = [
-            {"user": "testuser", "title": "Задача 1", "done": False}
-        ]
+        manager.logout()
+        manager.register("user2", "pass")
+        manager.login("user2", "pass")
+        manager.add_task("Задача user2")
 
-        # Отмечаем задачу как выполненную
-        index = 0
-        tasktracker.tasks[index]["done"] = True
+        tasks = manager.get_tasks_for_current_user()
 
-        assert tasktracker.tasks[0]["done"] is True
-
-    def test_save_tasks_to_file(self, temp_data_dir):
-        """TC-09: Сохранение задач в файл"""
-        import tasktracker
-
-        tasktracker.tasks = [
-            {"user": "testuser", "title": "Задача 1", "done": False},
-            {"user": "testuser", "title": "Задача 2", "done": True}
-        ]
-        tasktracker.TASKS_FILE = "data/tasks.json"
-
-        tasktracker.save_tasks()
-
-        with open("data/tasks.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        assert len(data) == 2
-        assert data[0]["title"] == "Задача 1"
-        assert data[1]["done"] is True
+        assert len(tasks) == 1
+        assert tasks[0]["user"] == "user2"
