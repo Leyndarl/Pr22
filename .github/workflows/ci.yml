@@ -29,13 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create build
+      - name: Create archive
         run: |
-          mkdir build
-          cp -r . build/
-          cd build && zip -r project.zip .
+          zip -r project.zip . -x "*.git*" -x "build/*" -x "__pycache__/*" -x "*.pyc"
 
       - uses: actions/upload-artifact@v4
         with:
           name: project-build
-          path: build/project.zip
+          path: project.zip
