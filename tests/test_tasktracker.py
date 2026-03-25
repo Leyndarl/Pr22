@@ -36,7 +36,7 @@ class TestTaskManager:
         """TC-01: Успешная регистрация"""
         success, message = manager.register("testuser", "password123")
 
-        assert success is False  # намеренно сломано
+        assert success is True  # исправлено
         assert "зарегистрирован" in message
         assert "testuser" in manager.users
 
